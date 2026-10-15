@@ -13,7 +13,7 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <Description>Windows Service List Manager - CLI Tool</Description>
     <Authors>Hadi Cahyadi</Authors>
     <Company>cumulus13</Company>
