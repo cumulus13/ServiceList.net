@@ -1,0 +1,34 @@
+{
+  "DefaultDisplay": "auto",
+  "TerminalWidthOverride": 0,
+  "Colors": {
+    "StatusRunning": "bold cyan",
+    "StatusStopped": "bold red",
+    "StatusPending": "bold magenta",
+    "StatusPaused": "bold blue",
+    "StatusUnknown": "bold grey",
+
+    "StartAuto": "bold cyan",
+    "StartDemand": "bold magenta",
+    "StartDisabled": "bold red",
+    "StartBoot": "bold blue",
+    "StartSystem": "bold green",
+    "StartOther": "bold grey",
+
+    "LabelColor": "grey",
+    "NameColor": "bold cyan",
+    "DisplayNameColor": "bold cyan",
+    "PidColor": "bold yellow",
+    "DescriptionColor": "green",
+
+    "TableBorder": "grey",
+    "TableHeader": "bold white",
+    "NumberColor": "bold white",
+
+    "FastNameColor": "bold cyan",
+    "FastDisplayColor": "bold yellow",
+    "FastPidColor": "bold green",
+    "FastStatusColor": "bold magenta",
+    "FastStartColor": "bold red"
+  }
+}
