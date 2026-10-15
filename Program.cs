@@ -29,11 +29,18 @@ static Option<T> Opt<T>(string longName, string shortAlias, string description)
     return o;
 }
 
-// Array options accept ZERO or more values (beta4 default for collection types).
+// Array options accept ZERO or more values (arity is set explicitly below).
 // An action flag given WITHOUT names (`-f spooler -st`) acts on the filtered services.
 static Option<T[]> OptArr<T>(string longName, string shortAlias, string description)
 {
-    var o = new Option<T[]>(longName) { Description = description, AllowMultipleArgumentsPerToken = true };
+    var o = new Option<T[]>(longName)
+    {
+        Description = description,
+        AllowMultipleArgumentsPerToken = true,
+        // Set explicitly: the default turned out to require >= 1 value
+        // ("Required argument missing for option '-st'").
+        Arity = ArgumentArity.ZeroOrMore,
+    };
     o.AddAlias(shortAlias);
     return o;
 }
