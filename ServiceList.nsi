@@ -2,7 +2,7 @@
 ; Author: Hadi Cahyadi <cumulus13@gmail.com>
 
 !define APP_NAME "ServiceList"
-!define APP_VERSION "1.0.3"
+!define APP_VERSION "1.0.4"
 !define APP_PUBLISHER "Hadi Cahyadi"
 !define APP_URL "https://github.com/cumulus13/ServiceList"
 !define DOTNET_VERSION "8.0"

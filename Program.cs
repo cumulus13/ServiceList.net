@@ -1,36 +1,36 @@
 // File: Program.cs
 // Author: Hadi Cahyadi <cumulus13@gmail.com>
 // Date: 2026-04-28
-// Description: 
+// Description: sl — Windows service manager CLI (option definitions + dispatch).
 // License: MIT
 
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
+using ServiceList.Cli;
 using ServiceList.Config;
 using ServiceList.Helpers;
-using ServiceList.Models;
-using ServiceList.Services;
 using Spectre.Console;
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
+
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-var appConfig   = ConfigLoader.Load();
-var reader      = new ServiceReader();
-var controller  = new ServiceController2();
-var renderer    = new Renderer(appConfig);
+var appConfig = ConfigLoader.Load();
 
 // ── CLI definition ───────────────────────────────────────────────────────────
 
-var root = new RootCommand("🖥  ServiceList (sl) — Windows Service Manager CLI");
+var root = new RootCommand("🖥 ServiceList (sl) — Windows Service Manager CLI");
 
-// ── Helper: create option + register short alias in one call ─────────────────
 static Option<T> Opt<T>(string longName, string shortAlias, string description)
 {
     var o = new Option<T>(longName) { Description = description };
     o.AddAlias(shortAlias);
     return o;
 }
+
+// Array options accept ZERO or more values (beta4 default for collection types).
+// An action flag given WITHOUT names (`-f spooler -st`) acts on the filtered services.
 static Option<T[]> OptArr<T>(string longName, string shortAlias, string description)
 {
     var o = new Option<T[]>(longName) { Description = description, AllowMultipleArgumentsPerToken = true };
@@ -38,203 +38,146 @@ static Option<T[]> OptArr<T>(string longName, string shortAlias, string descript
     return o;
 }
 
-// -- Filter options --
-var filterOpt        = OptArr<string>("--filter",         "-f",  "Filter by keyword (name/PID/description/status/start)");
-var filterStopOpt    = OptArr<string>("--filter-stop",    "-fs", "Filter and STOP matched services");
-var filterStartOpt   = OptArr<string>("--filter-start",   "-fS", "Filter and START matched services");
+// -- Selection --
+var filterOpt = OptArr<string>("--filter", "-f", "Filter by keyword (name/display/PID, plus description/status when listing). Supports * and ?");
+var statusOnlyOpt = Opt<string?>("--status-only", "-ss", "Select only: running|stopped|paused|startpending|stoppending");
+var startOnlyOpt = Opt<string?>("--start-only", "-cc", "Select only: auto|manual|disabled|boot|system");
+var exactOpt = Opt<bool>("--exact", "-e", "Filter: exact (case-insensitive) match instead of substring");
+var regexOpt = Opt<bool>("--regex", "-x", "Filter: treat keywords as regular expressions");
+
+// -- Actions (names optional: without names they apply to the selection) --
+var startOpt = OptArr<string>("--start", "-sa", "Start service(s): by name, or the filtered selection if no name is given");
+var stopOpt = OptArr<string>("--stop", "-st", "Stop service(s): by name, or the filtered selection if no name is given");
+var restartOpt = OptArr<string>("--restart", "-R", "Restart service(s): by name, or the filtered selection");
+var pauseOpt = OptArr<string>("--pause", "-sp", "Pause service(s): by name, or the filtered selection");
+var killOpt = OptArr<string>("--kill", "-k", "Force-kill service process(es): by name/PID, or the filtered selection");
+
+// -- Legacy "filter + action" aliases (keywords are the filter) --
+var filterStopOpt = OptArr<string>("--filter-stop", "-fs", "Filter and STOP matched services");
+var filterStartOpt = OptArr<string>("--filter-start", "-fS", "Filter and START matched services");
 var filterRestartOpt = OptArr<string>("--filter-restart", "-fr", "Filter and RESTART matched services");
-var filterKillOpt    = OptArr<string>("--filter-kill",    "-fk", "Filter and KILL (force) matched services");
+var filterKillOpt = OptArr<string>("--filter-kill", "-fk", "Filter and KILL (force) matched services");
 
-// -- Service control options --
-var startOpt    = OptArr<string>("--start",   "-sa", "Start service(s) by name");
-var stopOpt     = OptArr<string>("--stop",    "-st", "Stop service(s) by name");
-var restartOpt  = OptArr<string>("--restart", "-R",  "Restart service(s) by name");
-var pauseOpt    = OptArr<string>("--pause",   "-sp", "Pause service(s) by name");
-var killOpt     = OptArr<string>("--kill",    "-k",  "Force-kill service(s) by name or PID");
+// -- Action modifiers --
+var yesOpt = Opt<bool>("--yes", "-y", "Do not ask for confirmation when acting on several services");
+var dryRunOpt = Opt<bool>("--dry-run", "-n", "Show what would happen without changing anything");
+var depsOpt = Opt<bool>("--deps", "-D", "Stop/restart: include running dependent services");
+var forceOpt = Opt<bool>("--force", "-F", "Kill: allow killing a process shared with other services");
+var timeoutOpt = Opt<int?>("--timeout", "-to", "Seconds to wait for a state change (default 30)");
 
-// -- Display / sort options --
-var sortByOpt      = Opt<string?>("--sort-by",      "-S",  "Sort by: name|displayname|pid|status|start|description");
-var statusOnlyOpt  = Opt<string?>("--status-only",  "-ss", "Show only: running|stopped|paused|startpending|stoppending");
-var startOnlyOpt   = Opt<string?>("--start-only",   "-cc", "Show only: auto|manual|disabled|boot|system");
-var tailOpt        = Opt<int?>   ("--tail",          "-T",  "Show last N services");
-var reverseOpt     = Opt<bool>   ("--reverse",       "-r",  "Reverse sort order");
+// -- Display / sort --
+var sortByOpt = Opt<string?>("--sort-by", "-S", "Sort by: name|displayname|pid|status|start|description");
+var tailOpt = Opt<int?>("--tail", "-T", "Show last N services");
+var reverseOpt = Opt<bool>("--reverse", "-r", "Reverse sort order");
+var tableOpt = Opt<bool>("--table", "-t", "Force table display mode");
+var listOpt = Opt<bool>("--list", "-l", "Force detail-list display mode");
+var fastOpt = Opt<bool>("--fast", "-z", "Fast compact one-liner mode");
+var jsonOpt = Opt<bool>("--json", "-j", "Machine-readable JSON output");
 
-// -- Render mode options --
-var tableOpt     = Opt<bool>("--table", "-t", "Force table display mode");
-var listOpt      = Opt<bool>("--list",  "-l", "Force detail-list display mode");
-var fastOpt      = Opt<bool>("--fast",  "-z", "Fast compact one-liner mode");
-
-// -- Config option --
+// -- Config --
 var genConfigOpt = Opt<bool>("--gen-config", "-gc", "Generate sample sl-config.json in current directory");
 
-root.AddOption(filterOpt);
-root.AddOption(filterStopOpt);
-root.AddOption(filterStartOpt);
-root.AddOption(filterRestartOpt);
-root.AddOption(filterKillOpt);
-root.AddOption(startOpt);
-root.AddOption(stopOpt);
-root.AddOption(restartOpt);
-root.AddOption(pauseOpt);
-root.AddOption(killOpt);
-root.AddOption(sortByOpt);
-root.AddOption(statusOnlyOpt);
-root.AddOption(startOnlyOpt);
-root.AddOption(tailOpt);
-root.AddOption(reverseOpt);
-root.AddOption(tableOpt);
-root.AddOption(listOpt);
-root.AddOption(fastOpt);
-root.AddOption(genConfigOpt);
+foreach (var option in new Option[]
+{
+    filterOpt, statusOnlyOpt, startOnlyOpt, exactOpt, regexOpt,
+    startOpt, stopOpt, restartOpt, pauseOpt, killOpt,
+    filterStopOpt, filterStartOpt, filterRestartOpt, filterKillOpt,
+    yesOpt, dryRunOpt, depsOpt, forceOpt, timeoutOpt,
+    sortByOpt, tailOpt, reverseOpt, tableOpt, listOpt, fastOpt, jsonOpt,
+    genConfigOpt,
+})
+{
+    root.AddOption(option);
+}
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 root.SetHandler((InvocationContext ctx) =>
 {
-    var filter        = ctx.ParseResult.GetValueForOption(filterOpt)        ?? [];
-    var filterStop    = ctx.ParseResult.GetValueForOption(filterStopOpt)    ?? [];
-    var filterStart   = ctx.ParseResult.GetValueForOption(filterStartOpt)   ?? [];
-    var filterRestart = ctx.ParseResult.GetValueForOption(filterRestartOpt) ?? [];
-    var filterKill    = ctx.ParseResult.GetValueForOption(filterKillOpt)    ?? [];
+    var pr = ctx.ParseResult;
 
-    var startNames    = ctx.ParseResult.GetValueForOption(startOpt)    ?? [];
-    var stopNames     = ctx.ParseResult.GetValueForOption(stopOpt)     ?? [];
-    var restartNames  = ctx.ParseResult.GetValueForOption(restartOpt)  ?? [];
-    var pauseNames    = ctx.ParseResult.GetValueForOption(pauseOpt)    ?? [];
-    var killNames     = ctx.ParseResult.GetValueForOption(killOpt)     ?? [];
-
-    var sortBy        = ctx.ParseResult.GetValueForOption(sortByOpt);
-    var statusOnly    = ctx.ParseResult.GetValueForOption(statusOnlyOpt);
-    var startOnly     = ctx.ParseResult.GetValueForOption(startOnlyOpt);
-    var tail          = ctx.ParseResult.GetValueForOption(tailOpt);
-    var reverse       = ctx.ParseResult.GetValueForOption(reverseOpt);
-
-    var forceTable    = ctx.ParseResult.GetValueForOption(tableOpt);
-    var forceList     = ctx.ParseResult.GetValueForOption(listOpt);
-    var forceFast     = ctx.ParseResult.GetValueForOption(fastOpt);
-    var genConfig     = ctx.ParseResult.GetValueForOption(genConfigOpt);
-
-    // ── generate-config shortcut ──────────────────────────────────────────
-    if (genConfig)
+    if (pr.GetValueForOption(genConfigOpt))
     {
         var path = Path.Combine(Directory.GetCurrentDirectory(), "sl-config.json");
         ConfigLoader.WriteSampleConfig(path);
-        AnsiConsole.MarkupLine($"[green]✅ Sample config written to:[/] [cyan]{path}[/]");
+        AnsiConsole.MarkupLine($"[green]✅ Sample config written to:[/] [cyan]{Markup.Escape(path)}[/]");
+        ctx.ExitCode = 0;
         return;
     }
 
-    // ── Direct control commands (no listing needed) ────────────────────────
-    if (startNames.Length > 0)
-    {
-        foreach (var n in startNames) controller.StartService(n);
-        return;
-    }
-    if (stopNames.Length > 0)
-    {
-        foreach (var n in stopNames) controller.StopService(n);
-        return;
-    }
-    if (restartNames.Length > 0)
-    {
-        foreach (var n in restartNames) controller.RestartService(n);
-        return;
-    }
-    if (pauseNames.Length > 0)
-    {
-        foreach (var n in pauseNames) controller.PauseService(n);
-        return;
-    }
+    var filterTerms = new List<string>(pr.GetValueForOption(filterOpt) ?? []);
+    var actions = new List<(ActionKind Kind, string[] Names)>();
 
-    // ── Load all services ─────────────────────────────────────────────────
-    IEnumerable<ServiceInfo> services = [];
+    // An action flag counts as "used" when it is PRESENT, even with zero values.
+    // (HasOption is how `-f NAME -st` is told apart from "no -st at all".)
+    void Collect(ActionKind kind, Option<string[]> opt, bool valuesAreFilter)
+    {
+        if (!pr.HasOption(opt)) return;
+        var values = pr.GetValueForOption(opt) ?? [];
 
-    AnsiConsole.Status()
-        .Spinner(Spinner.Known.Dots)
-        .SpinnerStyle(Style.Parse("cyan"))
-        .Start("🔍 Loading services...", _ =>
+        if (valuesAreFilter)
         {
-            services = reader.GetAllServices();
-        });
-
-    // ── Kill by name/PID (direct, no listing) ─────────────────────────────
-    if (killNames.Length > 0)
-    {
-        var all = services.ToList();
-        foreach (var token in killNames)
-        {
-            var matches = all.Where(s =>
-                s.Name.Equals(token, StringComparison.OrdinalIgnoreCase) ||
-                s.Pid.ToString() == token);
-            foreach (var svc in matches) controller.KillService(svc);
+            filterTerms.AddRange(values);
+            actions.Add((kind, Array.Empty<string>()));
         }
+        else
+        {
+            actions.Add((kind, values));
+        }
+    }
+
+    Collect(ActionKind.Start, startOpt, false);
+    Collect(ActionKind.Stop, stopOpt, false);
+    Collect(ActionKind.Restart, restartOpt, false);
+    Collect(ActionKind.Pause, pauseOpt, false);
+    Collect(ActionKind.Kill, killOpt, false);
+    Collect(ActionKind.Start, filterStartOpt, true);
+    Collect(ActionKind.Stop, filterStopOpt, true);
+    Collect(ActionKind.Restart, filterRestartOpt, true);
+    Collect(ActionKind.Kill, filterKillOpt, true);
+
+    if (actions.Count > 1)
+    {
+        Console.Error.WriteLine("error: use only one action at a time (--start/--stop/--restart/--pause/--kill).");
+        ctx.ExitCode = CliRunner.ExitUsage;
         return;
     }
 
-    // ── Apply filters ─────────────────────────────────────────────────────
-    var activeFilter = filter
-        .Concat(filterStop)
-        .Concat(filterStart)
-        .Concat(filterRestart)
-        .Concat(filterKill)
-        .ToArray();
-
-    if (activeFilter.Length > 0)
-        services = FilterHelper.Filter(services, activeFilter);
-
-    if (!string.IsNullOrEmpty(statusOnly))
+    ActionKind? action = null;
+    string[] actionNames = [];
+    if (actions.Count == 1)
     {
-        var s = FilterHelper.ParseStatus(statusOnly);
-        if (s.HasValue) services = FilterHelper.FilterByStatus(services, s.Value);
+        action = actions[0].Kind;
+        actionNames = actions[0].Names;
     }
 
-    if (!string.IsNullOrEmpty(startOnly))
-    {
-        var st = FilterHelper.ParseStartType(startOnly);
-        if (st.HasValue) services = FilterHelper.FilterByStartType(services, st.Value);
-    }
+    RenderMode? mode = null;
+    if (pr.GetValueForOption(tableOpt)) mode = RenderMode.Table;
+    else if (pr.GetValueForOption(listOpt)) mode = RenderMode.DetailList;
+    else if (pr.GetValueForOption(fastOpt)) mode = RenderMode.FastList;
 
-    // ── Sort & tail ───────────────────────────────────────────────────────
-    services = FilterHelper.Sort(services, sortBy, reverse);
-    services = FilterHelper.Tail(services, tail);
+    var request = new CliRequest
+    {
+        Action = action,
+        ActionNames = actionNames,
+        FilterTerms = filterTerms.ToArray(),
+        StatusOnly = pr.GetValueForOption(statusOnlyOpt),
+        StartOnly = pr.GetValueForOption(startOnlyOpt),
+        SortBy = pr.GetValueForOption(sortByOpt),
+        Tail = pr.GetValueForOption(tailOpt),
+        Reverse = pr.GetValueForOption(reverseOpt),
+        Exact = pr.GetValueForOption(exactOpt),
+        UseRegex = pr.GetValueForOption(regexOpt),
+        Json = pr.GetValueForOption(jsonOpt),
+        Yes = pr.GetValueForOption(yesOpt),
+        DryRun = pr.GetValueForOption(dryRunOpt),
+        WithDependents = pr.GetValueForOption(depsOpt),
+        Force = pr.GetValueForOption(forceOpt),
+        TimeoutSeconds = pr.GetValueForOption(timeoutOpt) ?? 30,
+        Mode = mode,
+    };
 
-    // ── Perform action on filtered results ─────────────────────────────────
-    var resultList = services.ToList();
-
-    if (filterStop.Length > 0)
-    {
-        foreach (var svc in resultList) controller.StopService(svc.Name);
-        return;
-    }
-    if (filterStart.Length > 0)
-    {
-        foreach (var svc in resultList) controller.StartService(svc.Name);
-        return;
-    }
-    if (filterRestart.Length > 0)
-    {
-        foreach (var svc in resultList) controller.RestartService(svc.Name);
-        return;
-    }
-    if (filterKill.Length > 0)
-    {
-        foreach (var svc in resultList) controller.KillService(svc);
-        return;
-    }
-
-    // ── Determine render mode ─────────────────────────────────────────────
-    var mode = RenderMode.Auto;
-    if (forceTable) mode = RenderMode.Table;
-    else if (forceList) mode = RenderMode.DetailList;
-    else if (forceFast) mode = RenderMode.FastList;
-    else if (appConfig.DefaultDisplay == "table") mode = RenderMode.Table;
-    else if (appConfig.DefaultDisplay == "list")  mode = RenderMode.DetailList;
-    else
-    {
-        // Auto: table when terminal is wide enough
-        mode = Console.WindowWidth >= 131 ? RenderMode.Table : RenderMode.DetailList;
-    }
-
-    renderer.Render(resultList, mode);
+    ctx.ExitCode = new CliRunner(appConfig, request).Run();
 });
 
 return await root.InvokeAsync(args);

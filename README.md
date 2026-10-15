@@ -49,16 +49,15 @@ sl.exe %*
 sl [options]
 ```
 
-### List / Filter
+### List / Filter / Selecting services
 
 | Option | Short | Description |
-|---|---|---|
-| `--filter <kw...>` | `-f` | Filter by keyword (name, PID, display, description, status) |
-| `--status-only <s>` | `-ss` | Show only: `running`, `stopped`, `paused`, `startpending`… |
-| `--start-only <s>` | `-cc` | Show only: `auto`, `manual`, `disabled`, `boot`, `system` |
-| `--sort-by <field>` | `-S` | Sort: `name`, `displayname`, `pid`, `status`, `start`, `description` |
-| `--reverse` | `-r` | Reverse sort order |
-| `--tail <n>` | `-T` | Show last N results |
+| --- | --- | --- |
+| `--filter <kw...>` | `-f` | Keyword filter (OR). Matches name / display name / exact PID; when *listing* it also matches description, account, status, start type. Supports `*` and `?` |
+| `--status-only <s>` | `-ss` | `running`, `stopped`, `paused`, `startpending`, `stoppending`, … (invalid value = error) |
+| `--start-only <s>` | `-cc` | `auto`, `manual`, `disabled`, `boot`, `system` |
+| `--exact` | `-e` | Exact (case-insensitive) match instead of substring |
+| `--regex` | `-x` | Keywords are regular expressions |
 
 ### Display mode
 
@@ -68,15 +67,26 @@ sl [options]
 | `--list` | `-l` | Force detail-list mode |
 | `--fast` | `-z` | Force compact one-liner mode |
 
-### Service control
+### Service control Actions
 
-| Option | Short | Description |
-|---|---|---|
-| `--start <name...>` | `-sa` | Start service(s) by name |
-| `--stop <name...>` | `-st` | Stop service(s) by name |
-| `--restart <name...>` | `-R` | Restart service(s) by name |
-| `--pause <name...>` | `-sp` | Pause service(s) by name |
-| `--kill <name\|pid...>` | `-k` | Force-kill service(s) by name or PID |
+An action flag takes **optional** names. With names it acts on those services; with **no** names it
+acts on whatever `-f` / `-ss` / `-cc` selected.
+
+| Option | Short | |
+| --- | --- | --- |
+| `--start [name...]` | `-sa` | Start (resumes a paused service) |
+| `--stop [name...]` | `-st` | Stop |
+| `--restart [name...]` | `-R` | Restart |
+| `--pause [name...]` | `-sp` | Pause |
+| `--kill [name\|pid...]` | `-k` | Kill the service process |
+| `--filter-stop/-start/-restart/-kill <kw...>` | `-fs -fS -fr -fk` | Legacy aliases: keywords are the filter |
+
+Modifiers: `--yes/-y` (skip confirmation), `--dry-run/-n`, `--deps/-D` (stop/restart dependents too),
+`--force/-F` (kill a process shared with other services), `--timeout/-to <sec>` (default 30), `--json/-j`.
+
+Safety rules: an action with no name and no selector is refused; actions match on name / display
+name / exact PID only (never description); acting on more than one service asks for confirmation
+(non-interactive needs `--yes`); `kill` refuses PIDs ≤ 4 and shared `svchost` PIDs unless `--force`.
 
 ### Filter + action (combined)
 
@@ -92,6 +102,10 @@ sl [options]
 | Option | Short | Description |
 |---|---|---|
 | `--gen-config` | `-gc` | Write sample `sl-config.json` to current directory |
+
+### Exit codes
+
+`0` success · `1` something failed, or a filter matched nothing · `2` invalid usage.
 
 ---
 
@@ -155,6 +169,16 @@ sl -t -S status -r
 
 # Generate config
 sl --gen-config
+
+sl -f spooler -st                 # filter, then stop (the case that used to just list)
+sl -f spooler -st -n              # dry run
+sl -f "sql*" -ss running -R -y    # restart every running SQL* service, no prompt
+sl -st Spooler wuauserv           # by exact name
+sl -f IIS -st --deps              # stop, including dependents
+sl -cc auto -ss stopped -sa       # start every auto-start service that is stopped (asks first)
+sl -f nginx -k                    # kill the process
+sl -ss running -j                 # JSON for scripts
+
 ```
 
 ---

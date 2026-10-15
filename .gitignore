@@ -6,3 +6,11 @@
 *.exee
 obj/
 bin/
+
+# Ignore Sublime Text project files
+*.sublime-project
+*.sublime-workspace
+
+# Added entries (2 items)
+README_usage_section.md
+RENDERER_PATCH.md
